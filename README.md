@@ -128,7 +128,7 @@ open ~/Applications/"Draft Desk.app"
   `~/.local/bin/draftdesk`. Quit Draft Desk before installing a new build; the script refuses while it runs.
 - Other modes of `build.sh`: no argument builds only the command line; `--app` builds the app into
   `target/Draft Desk.app` without installing it; `--tests` runs the format check, the linter (clippy), a guard that the
-  command line has no sending code, and all tests.
+  command line has no sending code, and all tests, including the tests of `examples/check.py`.
 - On the first start the app asks for permission to send notifications and creates the key that signs the results.
 - Add accounts in the app's Settings (Cmd+,) or on the command line: `draftdesk account add-smtp`,
   `draftdesk account add-gmail`, `draftdesk account add-command`. `draftdesk config check` checks the configuration.
@@ -180,6 +180,61 @@ older version of the draft are marked as outdated.
 A fix command gets the draft and its findings and answers with `{"body":"..."}`. The app puts the new text in place as
 one undo step and saves it; it is never sent without a click.
 
+### An example check command
+
+`examples/check.py` is an example check command. It needs Python 3.9 or newer and the standard library only. The
+`python3` of the Xcode Command Line Tools is enough, and Draft Desk needs those anyway.
+
+To use it, choose `examples/check.py` as the check command in the Settings (the file is executable), or set it in
+`config.json`:
+
+```
+"check_command": {"argv": ["/path/to/draft-desk/examples/check.py"], "timeout_s": 300}
+```
+
+It runs two fixed checks first:
+
+- A weekday next to a date must fit the date. It knows English and German weekday names and their abbreviations, and
+  dates such as `17.11.2026`, `17.11.`, `2026-11-17`, `17 November 2026`, `17. November` and
+  `November 17, 2026`. The weekday may also stand after the date, in brackets or after a comma: `17.11. (Dienstag)`,
+  `17.11.2026, Montag`. A wrong weekday, or a date the calendar does not have (`31.11.`), is a blocking finding, so
+  the app asks before sending. Without a year it takes the first such date from 60 days ago on.
+- A text that mentions an attachment ("attached", "enclosed", "Anhang", "anbei" and similar words) but has none gets a
+  warning that asks before sending.
+
+Both checks look at the subject as well as the text. Quoted lines (starting with `>`) are left out.
+
+If Claude Code is installed, a second reader follows: `claude -p` reads the draft and the earlier messages of the
+thread. It runs without tools, without settings, hooks, MCP servers, memory or a saved session, in an empty temporary
+folder, with Claude Code's default model or the one given with `--model`.
+
+The second reader reports four things:
+
+- a question or request in the earlier messages that the draft leaves unanswered;
+- a statement in the draft that contradicts the earlier messages;
+- a greeting with a name that does not fit;
+- commitments (a price, a date or deadline, a promise), which come as info that asks for confirmation before sending.
+
+It reports nothing about style, tone or spelling, and it writes its findings in the language of the draft. Its
+findings never block, and a quote is kept only if it stands in the draft word for word.
+
+The draft and the earlier messages reach the second reader as data, with the instruction never to follow instructions
+inside them. In my test it ignored such an instruction hidden in an earlier message. Still, a mail can talk a model out
+of a finding; the fixed checks do not depend on it.
+
+If `claude` is not found, a finding of level info says the second reader was skipped. If it fails (not signed in, over
+the time limit, a broken answer), a warning says it did not run and why. It never ends in a silent pass.
+
+Draft Desk starts a check command with only `PATH`, `HOME` and `LANG`. The example therefore also looks for `claude`
+in `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` and `/usr/local/bin`, and passes the user name on, which
+`claude` needs to find its sign-in in the keychain.
+
+Options: `--no-claude` (only the fixed checks), `--claude PATH`, `--model NAME` and, for the second reader,
+`--timeout SECONDS` (default 240, below the app's default time limit of 300 seconds).
+
+In my test a run with the second reader took about 5 seconds. The tests of the example are in
+`examples/test_check.py`; `./build.sh --tests` runs them.
+
 ## What Draft Desk guarantees
 
 - **Only the app sends:** the sending code is compiled only into the app; a test and the build script check that the
@@ -215,8 +270,11 @@ Before publishing, they reviewed the whole code once more and then every fix aga
 Claude Code checked each report against the code and fixed 34 real problems, most of them small. The rest were false
 alarms or rare edge cases; the ones a user could run into are listed under [Limits](#limits).
 
-My own setup adds a check command (a second model reads every draft against its sources and checks the form) and a
-bridge to my own mail scripts. That part stays private.
+My own setup uses a check command of its own: a second model reads every draft against its sources and checks the
+form. That one stays private. `examples/check.py` is a simpler example of the same idea, with nothing from my own
+setup. Codex, GLM, Muse and Grok reviewed the example too. They found 15 real problems, all fixed, and 2 false
+alarms. [email-ops](https://github.com/kevintheo-ai/email-ops), my inbox skill for Claude Code, can hand its reply
+drafts to Draft Desk.
 
 The code is a Cargo workspace: `core` (draft format, queue, checks, building and sending mail; it also builds and runs
 its tests on Linux in CI), `cli` (the `draftdesk` command, without sending code) and `macos` (the app).

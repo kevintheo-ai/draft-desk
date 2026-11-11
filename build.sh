@@ -4,7 +4,7 @@
 #   ./build.sh --app      release build of the app, wrapped and signed into "target/Draft Desk.app" (nothing installed)
 #   ./build.sh --install  release build of app and command line, both signed with DRAFTDESK_SIGN_ID, installed as
 #                         ~/Applications/Draft Desk.app and ~/.local/bin/draftdesk
-#   ./build.sh --tests    format check, lints, the feature guard and the tests of every package
+#   ./build.sh --tests    format check, lints, the feature guard, the tests of every package and of examples/check.py
 #
 # Each package is built and tested in its own cargo call: cargo unifies features per call, and built together with the
 # app the command line would get the core's `send` feature.
@@ -195,6 +195,8 @@ case "${1:-}" in
     cargo test -p draftdesk-core --features send
     cargo test -p draftdesk-cli
     cargo test -p draftdesk-macos
+    # The example check command, with whatever python3 is first on PATH (3.9 or newer).
+    python3 -B examples/test_check.py
     ;;
   *) echo "Unknown option: $1 (allowed: --app, --install, --tests)" >&2; exit 2 ;;
 esac

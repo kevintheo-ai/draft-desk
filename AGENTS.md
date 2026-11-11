@@ -7,7 +7,9 @@ format, queue, sending behind the `send` feature), `cli` (the `draftdesk` comman
 ## Build and test
 
 - `./build.sh --tests` is the gate before every commit: format check, clippy with `-D warnings`, the feature guard
-  and the tests of every package. The other modes are listed at the top of `build.sh`.
+  and the tests of every package. The other modes are listed at the top of `build.sh`. `examples/check.py` is the
+  example check command: Python 3.9 or newer, standard library only. Its tests: `python3 -B examples/test_check.py`
+  (part of `./build.sh --tests`).
 - Build one package per cargo call (`-p draftdesk-cli`, `-p draftdesk-macos`): cargo unifies features per call, and
   built together with the app the command line would get `send`.
 - One test: `cargo test -p draftdesk-core --features send <name>`. The AppKit tests run in their own harness on the
