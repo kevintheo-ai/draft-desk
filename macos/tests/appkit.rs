@@ -176,15 +176,7 @@ mod harness {
         }
     }
 
-    /// GitHub Actions sets this on its runners.
-    fn on_ci() -> bool {
-        std::env::var_os("GITHUB_ACTIONS").is_some()
-    }
-
     fn windows_stay_invisible(mtm: MainThreadMarker) {
-        if on_ci() {
-            return; // the runner shows its windows (see `run`)
-        }
         install(App::new(mtm));
         let window = with_app_now(|a| a.window.clone()).unwrap();
         assert!(
@@ -214,12 +206,7 @@ mod harness {
         }
         let mtm = MainThreadMarker::new().expect("harness = false runs main on the main thread");
         let _ = NSApplication::sharedApplication(mtm);
-        // ponytail: on the CI runner nobody works at the screen, and there `remove_account_after_confirmation` failed
-        // every time with invisible windows (cause open), so the runner shows them as AppKit does. Find the cause, then
-        // run invisible everywhere.
-        if !on_ci() {
-            keep_windows_invisible();
-        }
+        keep_windows_invisible();
         i18n::set_german(true);
         let tests: Vec<Test> = vec![
             ("windows_stay_invisible", windows_stay_invisible),
@@ -631,6 +618,19 @@ mod harness {
     /// Runs the main run loop: queued app work and timers get their turn.
     fn run_loop(seconds: f64) {
         NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(seconds));
+    }
+
+    /// Runs the main run loop until `done` holds, at most `seconds`; true if it held. For app work that comes later
+    /// on a slow machine (a CI runner) than a fixed short wait allows.
+    fn run_loop_until(seconds: f64, mut done: impl FnMut() -> bool) -> bool {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds);
+        while !done() {
+            if std::time::Instant::now() >= end {
+                return false;
+            }
+            run_loop(0.01);
+        }
+        true
     }
 
     fn sidebar_lists_drafts_with_labels(mtm: MainThreadMarker) {
@@ -2140,12 +2140,19 @@ mod harness {
             s.window.clone()
         })
         .unwrap();
-        run_loop(0.05);
-        with_app_now(|a| {
-            assert!(a.settings.as_ref().unwrap().remove.isEnabled());
-            a.settings_remove();
-        })
-        .unwrap();
+        // The selection reaches the app through the main queue; a fixed wait of 0.05 s failed on the CI runner.
+        let enabled = run_loop_until(2.0, || {
+            with_app_now(|a| a.settings.as_ref().unwrap().remove.isEnabled()) == Some(true)
+        });
+        let state = with_app_now(|a| {
+            let s = a.settings.as_ref().unwrap();
+            (s.table.selectedRow(), s.table.numberOfRows())
+        });
+        assert!(
+            enabled,
+            "Remove stays disabled after 2 s: (selected row, rows) = {state:?}"
+        );
+        with_app_now(|a| a.settings_remove()).unwrap();
         let alert = with_app_now(|a| a.alert.clone())
             .unwrap()
             .expect("asks first");
