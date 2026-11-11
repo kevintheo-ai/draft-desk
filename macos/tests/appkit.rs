@@ -207,6 +207,14 @@ mod harness {
         let mtm = MainThreadMarker::new().expect("harness = false runs main on the main thread");
         let _ = NSApplication::sharedApplication(mtm);
         keep_windows_invisible();
+        // Invisible windows count as covered, and macOS may then nap the app: timers and the main queue slow down and
+        // the tests' short waits run out (measured: transparent windows report occlusion "not visible").
+        let _awake = objc2_foundation::NSProcessInfo::processInfo()
+            .beginActivityWithOptions_reason(
+                objc2_foundation::NSActivityOptions::UserInitiatedAllowingIdleSystemSleep
+                    | objc2_foundation::NSActivityOptions::LatencyCritical,
+                &NSString::from_str("AppKit tests"),
+            );
         i18n::set_german(true);
         let tests: Vec<Test> = vec![
             ("windows_stay_invisible", windows_stay_invisible),
