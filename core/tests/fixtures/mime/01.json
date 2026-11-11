@@ -1,0 +1,12 @@
+{
+  "from_name": "Max Muster",
+  "from_address": "max@example.org",
+  "to": "Ann Example <ann@example.org>",
+  "cc": "bob@example.org",
+  "subject": "Grüße zum Angebot",
+  "body": "Hello Ann,\n\nthis line was wrapped\nby a mail client at a fixed\nwidth and should be joined.\n\nSecond paragraph.\n\nFreundliche Grüsse\nMax Muster\n",
+  "in_reply_to": "<parent.1@example.org>",
+  "message_id": "<20261106223000.0123456789abcdef@example.org>",
+  "attachment_name": "Übersicht Größe.txt",
+  "attachment_content": "Zeile 1\nZeile 2\n"
+}

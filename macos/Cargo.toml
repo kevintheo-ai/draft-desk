@@ -1,0 +1,42 @@
+[package]
+name = "draftdesk-macos"
+description = "Draft Desk for macOS: review, edit and send the mail drafts agents hand over"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+# Not "DraftDesk": on the usual case-insensitive Mac file system that would be the same file under target/ as the
+# command line's `draftdesk`. build.sh copies it into the bundle as Contents/MacOS/DraftDesk.
+[[bin]]
+name = "draftdesk-app"
+path = "src/main.rs"
+
+# AppKit wants the main thread; the default test harness runs tests on worker threads.
+[[test]]
+name = "appkit"
+path = "tests/appkit.rs"
+harness = false
+
+[dependencies]
+# The only place with the core's `send` feature: the app sends, the command line never can.
+draftdesk-core = { path = "../core", features = ["send"] }
+chrono = { version = "=0.4.45", default-features = false, features = ["clock"] }
+
+[dev-dependencies]
+serde_json = "=1.0.154"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "=0.6.2"
+dispatch2 = "=0.3.1"
+libc = "=0.2.191"
+objc2 = "=0.6.5"
+objc2-app-kit = "=0.3.2"
+objc2-foundation = "=0.3.2"
+objc2-user-notifications = "=0.3.2"
+objc2-quick-look-ui = "=0.3.2"
+objc2-web-kit = "=0.3.2"

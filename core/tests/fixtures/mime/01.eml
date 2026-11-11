@@ -1,0 +1,54 @@
+From: Max Muster <max@example.org>
+To: Ann Example <ann@example.org>
+Cc: bob@example.org
+Subject: =?utf-8?q?Gr=C3=BC=C3=9Fe?= zum Angebot
+Message-ID: <20261106223000.0123456789abcdef@example.org>
+Date: Fri, 06 Nov 2026 22:56:36 +0100
+In-Reply-To: <parent.1@example.org>
+References: <parent.1@example.org>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============3023596507008049673=="
+
+--===============3023596507008049673==
+Content-Type: multipart/alternative; boundary="===============3410396492185702531=="
+
+--===============3410396492185702531==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Hello Ann,
+
+this line was wrapped by a mail client at a fixed width and should be joined.
+
+Second paragraph.
+
+Freundliche Grüsse
+Max Muster
+
+--===============3410396492185702531==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<!DOCTYPE html><html><head><meta charset=3D"utf-8"><meta name=3D"viewport" co=
+ntent=3D"width=3Ddevice-width,initial-scale=3D1"><meta name=3D"color-scheme" =
+content=3D"light dark"><meta name=3D"supported-color-schemes" content=3D"ligh=
+t dark"></head><body><div style=3D"font-family:Arial,Helvetica,sans-serif;fon=
+t-size:14px"><div style=3D"line-height:1.5">Hello Ann,</div><div style=3D"lin=
+e-height:1.5"><br></div><div style=3D"line-height:1.5">this line was wrapped =
+by a mail client at a fixed width and should be joined.</div><div style=3D"li=
+ne-height:1.5"><br></div><div style=3D"line-height:1.5">Second paragraph.</di=
+v><div style=3D"line-height:1.5"><br></div><div style=3D"line-height:1.5">Fre=
+undliche Gr=C3=BCsse<br>Max Muster</div></div></body></html>
+
+--===============3410396492185702531==--
+
+--===============3023596507008049673==
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename*=utf-8''%C3%9Cbersicht%20Gr%C3%B6%C3%9Fe.txt
+MIME-Version: 1.0
+
+WmVpbGUgMQpaZWlsZSAyCg==
+
+--===============3023596507008049673==--

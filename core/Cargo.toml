@@ -1,0 +1,32 @@
+[package]
+name = "draftdesk-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Sending lives behind this feature. Only the app turns it on; the command line can never send.
+send = []
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+lettre = { version = "=0.11.23", default-features = false, features = ["builder", "smtp-transport", "native-tls", "hostname"] }
+# ponytail: the 3.0 alpha line is what the ecosystem uses (the 2.x line is unmaintained); revisit when 3.0 is final.
+imap = "=3.0.0-alpha.15"
+ureq = { version = "=3.5.1", default-features = false, features = ["native-tls-no-default", "json"] }
+mailparse = "=0.18.0"
+# TLS for IMAP with our own socket time limits (the version the imap and lettre crates already use).
+native-tls = "=0.2.18"
+sha2 = "=0.11.1"
+hmac = "=0.13.0"
+getrandom = "=0.4.3"
+base64 = "=0.23.1"
+chrono = { version = "=0.4.45", default-features = false, features = ["clock"] }
+libc = "=0.2.191"
+regex = "=1.13.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "=3.7.0"

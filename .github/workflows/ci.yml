@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./build.sh --tests
+
+  core-on-linux:
+    # The core crate keeps Mac-only code to its keychain module (the rest is plain POSIX); this keeps it that way.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo clippy -p draftdesk-core --all-targets --features send -- -D warnings
+      - run: cargo test -p draftdesk-core --features send

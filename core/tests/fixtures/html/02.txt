@@ -1,0 +1,7 @@
+Hello Ann,
+
+this line was wrapped
+by a mail client at a fixed
+width and should be joined.
+
+Second paragraph.

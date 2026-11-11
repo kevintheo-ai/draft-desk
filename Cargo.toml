@@ -1,0 +1,18 @@
+[workspace]
+members = ["core", "cli", "macos"]
+# A plain `cargo build` leaves the app out: built together with it, the command line would get the core's `send`
+# feature (cargo unifies features per call). Build the app with `-p draftdesk-macos` (./build.sh --app).
+default-members = ["core", "cli"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/kevintheo-ai/draft-desk"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

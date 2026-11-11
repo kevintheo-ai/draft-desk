@@ -1,0 +1,18 @@
+[package]
+name = "draftdesk-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "draftdesk"
+path = "src/main.rs"
+
+[dependencies]
+# Never enable the `send` feature here: the command line must not be able to send.
+draftdesk-core = { path = "../core" }
+serde_json = "=1.0.154"
+chrono = { version = "=0.4.45", default-features = false, features = ["clock"] }
+libc = "=0.2.191"
