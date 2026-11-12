@@ -190,9 +190,11 @@ mod harness {
             "the setter keeps it transparent"
         );
         window.setIgnoresMouseEvents(false);
-        run_loop(0.05);
+        assert!(
+            wait_for(2.0, || window.ignoresMouseEvents()),
+            "clamped back on the next pass"
+        );
         assert!(window.isVisible(), "shown for the app");
-        assert!(window.ignoresMouseEvents(), "clamped back on the next pass");
     }
 
     pub fn run() {
@@ -612,7 +614,7 @@ mod harness {
     /// One poll into the window, as the app's tick does.
     fn refresh() {
         with_app_now(App::refresh).unwrap();
-        run_loop(0.05);
+        settle(0.05);
     }
 
     /// Runs the main run loop: queued app work and timers get their turn.
@@ -620,17 +622,19 @@ mod harness {
         NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(seconds));
     }
 
-    /// Runs the main run loop until `done` holds, at most `seconds`; true if it held. For app work that comes later
-    /// on a slow machine (a CI runner) than a fixed short wait allows.
-    fn run_loop_until(seconds: f64, mut done: impl FnMut() -> bool) -> bool {
-        let end = std::time::Instant::now() + std::time::Duration::from_secs_f64(seconds);
-        while !done() {
-            if std::time::Instant::now() >= end {
-                return false;
-            }
-            run_loop(0.01);
-        }
-        true
+    /// Runs the main run loop for `min_seconds`, then until everything queued on the main queue before has run (at
+    /// most 2 s more). App work reaches the app through the main queue, and a slow machine (a CI runner) gets to it
+    /// later than a fixed short wait allows.
+    fn settle(min_seconds: f64) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        run_loop(min_seconds);
+        let done = Arc::new(AtomicBool::new(false));
+        let d = Arc::clone(&done);
+        draftdesk_macos::on_main(move || d.store(true, Ordering::SeqCst));
+        assert!(
+            wait_for(2.0, || done.load(Ordering::SeqCst)),
+            "the main queue did not drain within 2 s"
+        );
     }
 
     fn sidebar_lists_drafts_with_labels(mtm: MainThreadMarker) {
@@ -655,7 +659,7 @@ mod harness {
         let b = f.add("B");
         f.install(mtm);
         with_app_now(|app| app.select(Some(&b))).unwrap();
-        run_loop(0.05);
+        settle(0.05);
         refresh();
         assert_eq!(
             with_app_now(|app| app.selected.clone()).unwrap(),
@@ -775,8 +779,7 @@ mod harness {
         // The click on "Ins Archiv".
         // SAFETY: a button of the app's own window, main thread.
         unsafe { target.performClick(None) };
-        run_loop(0.05);
-        assert!(!dir.exists(), "moved to the archive");
+        assert!(wait_for(2.0, || !dir.exists()), "moved to the archive");
         assert_eq!(with_app_now(|a| a.items.len()).unwrap(), 0);
     }
 
@@ -797,7 +800,7 @@ mod harness {
         let button = with_app_now(|a| a.editor.banner.action.clone()).unwrap();
         // SAFETY: a button of the app's own window, main thread.
         unsafe { button.performClick(None) };
-        run_loop(0.05);
+        settle(0.05);
     }
 
     fn typing_then_flush_saves_and_marks_edited(mtm: MainThreadMarker) {
@@ -873,7 +876,7 @@ mod harness {
         let pick = |id: &str| {
             let row = sidebar::index_of(id).unwrap();
             table.selectRowIndexes_byExtendingSelection(&NSIndexSet::indexSetWithIndex(row), false);
-            run_loop(0.05);
+            settle(0.05);
         };
         pick(&b_id);
         with_app_now(|a| {
@@ -938,7 +941,7 @@ mod harness {
         .unwrap();
         // One undo step brings it back.
         body.undoManager().unwrap().undo();
-        run_loop(0.05);
+        wait_for(2.0, || body.string().to_string() == "Hi\u{200B}there\n");
         assert_eq!(body.string().to_string(), "Hi\u{200B}there\n");
     }
 
@@ -951,7 +954,7 @@ mod harness {
                 NSRange::new(objc2_foundation::NSNotFound as usize, 0),
             )
         };
-        run_loop(0.05);
+        settle(0.05);
     }
 
     fn typed_recipient_without_separator_counts(mtm: MainThreadMarker) {
@@ -1203,7 +1206,7 @@ mod harness {
             .expect("a remove button next to a.txt");
         // SAFETY: a button of the app's own window, main thread.
         unsafe { remove.performClick(None) };
-        run_loop(0.05);
+        wait_for(2.0, || names(&id) == vec!["b.txt"]);
         assert_eq!(names(&id), vec!["b.txt"]);
         let titles = with_app_now(|a| a.editor.strip.titles()).unwrap();
         assert!(
@@ -1252,7 +1255,7 @@ mod harness {
         run_loop(0.2);
         // SAFETY: the shared panel on the main thread.
         let panel = unsafe { QLPreviewPanel::sharedPreviewPanel(mtm) }.unwrap();
-        let visible = panel.isVisible();
+        let visible = wait_for(2.0, || panel.isVisible());
         let delegate = with_app_now(|a| a.delegate.clone()).unwrap();
         let me: &AnyObject = delegate.as_ref();
         // SAFETY: the calls Quick Look makes on its controller, main thread.
@@ -1267,7 +1270,7 @@ mod harness {
             (accepts, source, count, panel.dataSource().is_none())
         };
         panel.orderOut(None);
-        run_loop(0.1);
+        settle(0.1);
         assert!(visible && accepts && source && after);
         assert_eq!(count, 1);
         let shown = draftdesk_macos::attachments::preview_item(0)
@@ -1306,7 +1309,7 @@ mod harness {
             if done() {
                 return true;
             }
-            run_loop(0.05);
+            run_loop(0.01);
         }
         done()
     }
@@ -1482,7 +1485,9 @@ mod harness {
         );
         // One undo step takes it back.
         body.undoManager().unwrap().undo();
-        run_loop(0.05);
+        wait_for(2.0, || {
+            body.string().to_string() == "Hello Ann,\n\nthanks.\n"
+        });
         assert_eq!(body.string().to_string(), "Hello Ann,\n\nthanks.\n");
     }
 
@@ -1591,7 +1596,7 @@ mod harness {
 
     fn answer(window: &NSWindow, alert: &NSAlert, response: NSModalResponse) {
         window.endSheet_returnCode(&alert.window(), response);
-        run_loop(0.1);
+        settle(0.1);
     }
 
     fn send_waits_for_undo_then_sends(mtm: MainThreadMarker) {
@@ -1646,7 +1651,9 @@ mod harness {
         .unwrap();
         // SAFETY: a button of the app's own window, main thread.
         unsafe { button.performClick(None) };
-        run_loop(0.05);
+        wait_for(2.0, || {
+            with_app_now(|a| a.pending_ids().is_empty()) == Some(true)
+        });
         with_app_now(|a| {
             assert!(a.pending_ids().is_empty());
             assert!(a.editor.undo.view.isHidden());
@@ -1868,8 +1875,10 @@ mod harness {
             a.on_action(Action::Discard);
         })
         .unwrap();
-        run_loop(0.05);
-        assert!(!dir.exists(), "moved to the archive, nothing sent");
+        assert!(
+            wait_for(2.0, || !dir.exists()),
+            "moved to the archive, nothing sent"
+        );
     }
 
     // ---------- Poll, new drafts, notifications ----------
@@ -2141,7 +2150,7 @@ mod harness {
         })
         .unwrap();
         // The selection reaches the app through the main queue; a fixed wait of 0.05 s failed on the CI runner.
-        let enabled = run_loop_until(2.0, || {
+        let enabled = wait_for(2.0, || {
             with_app_now(|a| a.settings.as_ref().unwrap().remove.isEnabled()) == Some(true)
         });
         let state = with_app_now(|a| {
@@ -2533,7 +2542,7 @@ mod harness {
         assert_eq!(ran.get(), 0, "the app was busy");
         assert!(cpu < 0.25, "the main thread spun for {cpu:.2} s of 0.5 s");
         with_app(|_| {});
-        run_loop(0.2);
+        wait_for(2.0, || ran.get() == 1);
         assert_eq!(
             ran.get(),
             1,
@@ -2553,7 +2562,7 @@ mod harness {
         assert_eq!(ran.get(), 0, "no app yet");
         install(app);
         with_app(|_| {});
-        run_loop(0.2);
+        wait_for(2.0, || ran.get() == 1);
         assert_eq!(ran.get(), 1, "runs once the app is there");
     }
 
