@@ -34,9 +34,12 @@ const USAGE: &str = "draftdesk: hand a mail draft to Draft Desk for review; a pe
   draftdesk account list
   draftdesk account remove --name N
   draftdesk config check
+  draftdesk keychain check
 
 Root: $DRAFTDESK_HOME, else ~/Library/Application Support/Draft Desk.
-Exit codes: 0 ok, 1 error, 2 invalid input or refused, 3 unknown id, 124 time limit.";
+DRAFTDESK_NO_PROMPT=1: never show or wait for a keychain dialog, for callers that run unattended.
+Exit codes: 0 ok, 1 error, 2 invalid input or refused, 3 unknown id, 4 the keychain asks for approval (only with
+DRAFTDESK_NO_PROMPT=1: run `draftdesk keychain check` once at the Mac and allow), 124 time limit.";
 
 /// An exit code with a message for stderr.
 struct Fail(u8, String);
@@ -47,12 +50,30 @@ fn fail<T>(code: u8, msg: impl Into<String>) -> Result<T, Fail> {
     Err(Fail(code, msg.into()))
 }
 
+/// Exit code when the keychain would ask the person but `DRAFTDESK_NO_PROMPT=1` forbids the dialog.
+const NEEDS_APPROVAL_EXIT: u8 = 4;
+
 fn err1(e: draftdesk_core::Error) -> Fail {
+    if e.0.starts_with(draftdesk_core::secrets::NEEDS_APPROVAL) {
+        return Fail(
+            NEEDS_APPROVAL_EXIT,
+            format!(
+                "{} (DRAFTDESK_NO_PROMPT=1): run `draftdesk keychain check` once at the Mac and allow",
+                e.0
+            ),
+        );
+    }
     Fail(1, e.0)
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if std::env::var_os("DRAFTDESK_NO_PROMPT").is_some_and(|v| v == "1")
+        && let Err(e) = draftdesk_core::secrets::no_prompts()
+    {
+        eprintln!("draftdesk: {}", e.0);
+        return ExitCode::from(1);
+    }
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(Fail(code, msg)) => {
@@ -177,6 +198,7 @@ fn run(args: &[String]) -> Out {
             println!("ok");
             Ok(())
         }
+        ["keychain", "check"] => keychain_check(&a),
         [] | ["help"] => {
             println!("{USAGE}");
             Ok(())
@@ -187,6 +209,17 @@ fn run(args: &[String]) -> Out {
 
 fn print(v: &Value) {
     println!("{v}");
+}
+
+/// Reads the signing key once, the only entry the command line uses. macOS ties keychain approvals to the build, so
+/// after an install this is where the dialog comes, while someone is at the Mac (`./build.sh --install` runs it).
+fn keychain_check(a: &Args) -> Out {
+    a.only(&[])?;
+    match secrets().get(results::KEY_NAME).map_err(err1)? {
+        Some(_) => println!("ok"),
+        None => println!("ok: no signing key yet, the app creates it at its first start"),
+    }
+    Ok(())
 }
 
 fn replaced_json(r: &Option<ReplaceOutcome>) -> Value {
@@ -565,4 +598,24 @@ fn account_remove(a: &Args) -> Out {
     }
     print(&json!({"account": name, "removed": true}));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_keychain_approval_has_its_own_exit_code() {
+        let approval = draftdesk_core::Error(format!(
+            "{}: Draft Desk / result-signing-key",
+            draftdesk_core::secrets::NEEDS_APPROVAL
+        ));
+        let Fail(code, msg) = err1(approval);
+        assert_eq!(code, NEEDS_APPROVAL_EXIT);
+        assert!(msg.contains("draftdesk keychain check"), "{msg}");
+        let Fail(code, _) = err1(draftdesk_core::Error(
+            "keychain result-signing-key: denied".into(),
+        ));
+        assert_eq!(code, 1);
+    }
 }

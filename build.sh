@@ -17,7 +17,11 @@
 #
 # Environment (optional, required for --install):
 #   DRAFTDESK_SIGN_ID  code signing identity from your keychain (default: ad hoc). Keychain approvals belong to the
-#                      signature: with a named identity they survive rebuilds; ad hoc, macOS asks again after a build.
+#                      build: a keychain entry's access list keeps a program signed with a named identity across
+#                      builds, but its partition list names code without an Apple team id (self-signed or ad hoc) by
+#                      its cdhash, which changes with every build. So macOS asks once after every install; --install
+#                      asks for the command line right away, while you are at the Mac (the app asks when it first
+#                      reads an entry).
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -152,6 +156,28 @@ install_built() {
   fi
 }
 
+# keychain_approval: the new command line reads its keychain entry once now, while someone is at the Mac, so that
+# macOS asks here and not later in a background call (which, with DRAFTDESK_NO_PROMPT=1, fails with exit 4 instead).
+keychain_approval() {
+  local cli="$HOME/.local/bin/draftdesk" rc=0
+  DRAFTDESK_NO_PROMPT=1 "$cli" keychain check >/dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$rc" -eq 4 ]; then
+    echo "macOS asks now whether draftdesk may use its keychain entry \"Draft Desk\": enter your password and" >&2
+    echo "choose Always Allow." >&2
+  fi
+  # The second call must be allowed to ask, even when the caller exported DRAFTDESK_NO_PROMPT=1.
+  rc=0
+  env -u DRAFTDESK_NO_PROMPT "$cli" keychain check >/dev/null || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    # Name the exit code seen: only exit 4 means a missing approval, others are keychain errors of their own.
+    echo "warning: draftdesk cannot read the keychain (exit $rc); run \`draftdesk keychain check\` once at the Mac" >&2
+    echo "until it succeeds." >&2
+  fi
+}
+
 case "${1:-}" in
   "")
     pin_target
@@ -163,8 +189,8 @@ case "${1:-}" in
     app_bundle
     ;;
   --install)
-    # A named identity, never ad hoc: with ad hoc signatures macOS asks for keychain access again after every build,
-    # and calls from scripts block on that question.
+    # A named identity, never ad hoc: ad hoc, a keychain entry's access list knows each build only by its cdhash, so
+    # every build is a stranger to it (with a named identity only the partition list asks again, see the top).
     if [ -z "${DRAFTDESK_SIGN_ID:-}" ] || [ "$DRAFTDESK_SIGN_ID" = "-" ]; then
       echo "--install needs DRAFTDESK_SIGN_ID: a code signing identity from your keychain" >&2
       echo "(security find-identity -v -p codesigning). Ad hoc, the keychain asks again after every build." >&2
@@ -177,6 +203,7 @@ case "${1:-}" in
     cargo build --release -p draftdesk-macos
     app_bundle >/dev/null
     install_built
+    keychain_approval
     ;;
   --tests)
     cargo fmt --all --check

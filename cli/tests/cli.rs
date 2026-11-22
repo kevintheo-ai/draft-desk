@@ -480,6 +480,29 @@ fn accounts_add_list_remove() {
 }
 
 #[test]
+fn keychain_check_reads_the_signing_key() {
+    let e = env("kc");
+    let out = e.run(&["keychain", "check"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
+    std::fs::write(e.root.join("secrets.json"), "{}").unwrap();
+    let out = e.run(&["keychain", "check"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("no signing key yet"));
+    // The switch for unattended callers changes nothing when nothing has to be approved.
+    let out = e
+        .command(&["keychain", "check"])
+        .env("DRAFTDESK_NO_PROMPT", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        e.run(&["keychain", "check", "--json"]).status.code(),
+        Some(2)
+    );
+}
+
+#[test]
 fn cli_has_no_send_command() {
     let e = env("h");
     let id = e.add();

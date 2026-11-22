@@ -128,9 +128,8 @@ fn the_bundle_id_has_one_home() {
     assert!(script.contains("APP_BUNDLE_ID") && script.contains("core/src/lib.rs"));
 }
 
-/// `./build.sh --install` refuses an ad hoc signature: the keychain would ask again after every build, and calls from
-/// scripts would block. A fake `cargo` and a temporary HOME make sure nothing is built or installed even if the check
-/// broke.
+/// `./build.sh --install` refuses an ad hoc signature: a keychain entry's access list would know each build only by
+/// its cdhash. A fake `cargo` and a temporary HOME make sure nothing is built or installed even if the check broke.
 #[test]
 fn install_needs_a_signing_identity() {
     use std::os::unix::fs::PermissionsExt;

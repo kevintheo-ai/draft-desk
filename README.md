@@ -104,7 +104,12 @@ only when the provider refused the mail and nothing was sent.
 Results are signed (HMAC-SHA256) with a key in the macOS keychain. The app creates that key at its first start; until
 then no result can be published, so start the app once before an agent uses `wait` or `claim`.
 
-Exit codes of the command line: 0 ok, 1 error, 2 invalid input or refused, 3 unknown id, 124 time limit.
+Exit codes of the command line: 0 ok, 1 error, 2 invalid input or refused, 3 unknown id, 4 the keychain asks for
+approval (only with `DRAFTDESK_NO_PROMPT=1`), 124 time limit.
+
+Unattended callers, such as a background job, can set `DRAFTDESK_NO_PROMPT=1`: the command line then never shows
+or waits for a keychain dialog. A keychain read, write or delete that would ask fails at once with exit code 4.
+On exit code 4, run `draftdesk keychain check` once at the Mac and allow.
 
 ## Requirements
 
@@ -112,7 +117,10 @@ Exit codes of the command line: 0 ok, 1 error, 2 invalid input or refused, 3 unk
 - Rust 1.89 or newer (rustup.rs, or `brew install rust`) and the Xcode Command Line Tools
   (`xcode-select --install`).
 - A code signing identity in your keychain for `--install`: a self-signed "Code Signing" certificate made in Keychain
-  Access is enough. macOS ties keychain approvals to the signature, so with a fixed identity they survive rebuilds.
+  Access is enough. Approvals do not carry over to a new build, because the keychain identifies self-signed code by
+  its cdhash, which changes with every build. After each install macOS asks once per keychain entry. `--install`
+  runs `draftdesk keychain check` so you can allow the command line's entry at once; the app asks for the signing
+  key when it starts and for an account password when it first sends with that account.
 
 ## Install
 

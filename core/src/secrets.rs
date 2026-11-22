@@ -84,16 +84,59 @@ impl Secrets for MemorySecrets {
 /// The macOS login keychain, as generic passwords under [`SERVICE`].
 pub struct Keychain;
 
+/// Start of the error message when the keychain would ask the person (allow access, unlock) but prompts are off
+/// ([`no_prompts`]). The command line turns it into its own exit code.
+pub const NEEDS_APPROVAL: &str = "the keychain asks for approval";
+
+/// Turns keychain dialogs off for the rest of this process: a read that would ask the person fails at once with
+/// [`NEEDS_APPROVAL`] instead of waiting for a click. For callers that run unattended. No-op off macOS.
+pub fn no_prompts() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use security_framework::os::macos::keychain::SecKeychain;
+        // SecKeychainSetUserInteractionAllowed(false), process-wide; the guard would turn dialogs back on when
+        // dropped, so it is kept for the life of the process.
+        let lock = SecKeychain::disable_user_interaction()
+            .map_err(|e| crate::Error(format!("keychain: {e}")))?;
+        std::mem::forget(lock);
+    }
+    Ok(())
+}
+
+/// Whether a keychain error code, with dialogs off, means "the person has to approve this first". Without dialogs
+/// the Security framework sends securityd no prompt credential (`Globals::itemCredentials` returns `nullCred`), so
+/// an entry whose access list or partition list lacks this program fails with `errSecAuthFailed` instead of asking
+/// (securityd `SecurityServerAcl::validatePartition`). A locked keychain gives `errSecInteractionNotAllowed`, and
+/// `errSecUserCanceled` is a dialog cancelled for us, since nobody could click.
+pub fn needs_approval(code: i32) -> bool {
+    const AUTH_FAILED: i32 = -25293;
+    const INTERACTION_NOT_ALLOWED: i32 = -25308;
+    const USER_CANCELED: i32 = -128;
+    matches!(code, AUTH_FAILED | INTERACTION_NOT_ALLOWED | USER_CANCELED)
+}
+
 #[cfg(target_os = "macos")]
 mod keychain {
-    use super::{Keychain, SERVICE, Secrets};
+    use super::{Keychain, NEEDS_APPROVAL, SERVICE, Secrets, needs_approval};
     use crate::{Error, Result};
+    use security_framework::os::macos::keychain::SecKeychain;
     use security_framework::passwords::{
         delete_generic_password, get_generic_password, set_generic_password,
     };
 
     /// `errSecItemNotFound`.
     const NOT_FOUND: i32 = -25300;
+
+    /// The error for `key`: [`NEEDS_APPROVAL`] when dialogs are off and the keychain wanted one, else the raw error.
+    /// Shared by get, set and delete, so every refused call ends with the same exit code.
+    fn keychain_error(key: &str, e: security_framework::base::Error) -> Error {
+        if needs_approval(e.code()) && matches!(SecKeychain::user_interaction_allowed(), Ok(false))
+        {
+            Error(format!("{NEEDS_APPROVAL}: {SERVICE} / {key}"))
+        } else {
+            Error(format!("keychain {key}: {e}"))
+        }
+    }
 
     impl Secrets for Keychain {
         fn get(&self, key: &str) -> Result<Option<String>> {
@@ -102,18 +145,17 @@ mod keychain {
                     .map(Some)
                     .map_err(|_| Error(format!("keychain {key}: not UTF-8"))),
                 Err(e) if e.code() == NOT_FOUND => Ok(None),
-                Err(e) => Err(Error(format!("keychain {key}: {e}"))),
+                Err(e) => Err(keychain_error(key, e)),
             }
         }
         fn set(&self, key: &str, value: &str) -> Result<()> {
-            set_generic_password(SERVICE, key, value.as_bytes())
-                .map_err(|e| Error(format!("keychain {key}: {e}")))
+            set_generic_password(SERVICE, key, value.as_bytes()).map_err(|e| keychain_error(key, e))
         }
         fn delete(&self, key: &str) -> Result<()> {
             match delete_generic_password(SERVICE, key) {
                 Ok(()) => Ok(()),
                 Err(e) if e.code() == NOT_FOUND => Ok(()),
-                Err(e) => Err(Error(format!("keychain {key}: {e}"))),
+                Err(e) => Err(keychain_error(key, e)),
             }
         }
     }
@@ -154,6 +196,17 @@ mod tests {
         assert_eq!(s.get("a").unwrap(), None);
         assert_eq!(s.get("b").unwrap().as_deref(), Some("2"));
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn only_refusals_without_a_dialog_need_approval() {
+        for code in [-25293, -25308, -128] {
+            assert!(needs_approval(code), "{code}");
+        }
+        // Not found, duplicate, no such keychain: real answers, not a missing approval.
+        for code in [0, -25300, -25299, -25294] {
+            assert!(!needs_approval(code), "{code}");
+        }
     }
 
     #[test]
