@@ -10,6 +10,7 @@ pub mod app;
 pub mod attachments;
 pub mod editor;
 pub mod findings;
+pub mod follow_up;
 pub mod i18n;
 pub mod log;
 pub mod menu;

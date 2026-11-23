@@ -151,6 +151,35 @@ fn add_then_status_then_list() {
 }
 
 #[test]
+fn status_shows_the_follow_up_answer() {
+    let e = env("fu");
+    let draft = e.draft(
+        r#","follow_up":{"label":"Wait for a reply, then","text":"compare the offer",
+            "choices":[{"name":"Deadline","options":["3 working days","1 week"]}]}"#,
+    );
+    let out = e.run(&["add", draft.to_str().unwrap()]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let id = json(&out)["item_id"].as_str().unwrap().to_string();
+    let f = &json(&e.run(&["status", &id]))["follow_up"];
+    assert_eq!(f["checked"], false);
+    assert_eq!(f["text"], "compare the offer");
+    assert_eq!(f["choices"][0]["selected"], "3 working days");
+    // Without one, the key is null.
+    let plain = e.add();
+    assert!(json(&e.run(&["status", &plain]))["follow_up"].is_null());
+    // An agent cannot hand the box over checked.
+    let checked = e.draft(r#","follow_up":{"label":"Then","checked":true}"#);
+    let out = e.run(&["add", checked.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("follow_up.checked"));
+}
+
+#[test]
 fn add_invalid_exit2_no_files() {
     let e = env("b");
     let bad = e.root.join("bad.json");

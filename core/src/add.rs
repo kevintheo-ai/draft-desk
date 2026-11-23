@@ -154,6 +154,10 @@ fn prepare(
             .map(crate::item::Finding::cleaned)
             .collect();
     }
+    let follow_up = draft
+        .follow_up
+        .map(crate::follow_up::from_agent)
+        .transpose()?;
     let mut item = Item {
         schema: ITEM_SCHEMA.into(),
         item_id: id.into(),
@@ -185,6 +189,7 @@ fn prepare(
             })
             .collect(),
         checks,
+        follow_up,
         edits: Edits::default(),
         send: SendState::default(),
         history: vec![HistoryEntry {
@@ -1145,5 +1150,44 @@ mod tests {
         fs::create_dir_all(&tmp).unwrap();
         fs::set_permissions(&tmp, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(store.list().is_empty());
+    }
+
+    #[test]
+    fn follow_up_is_stored_unchecked_and_outside_the_digest() {
+        let (_r, store, _files) = setup("fu1");
+        let plain = valid(
+            &store,
+            &add(&store, draft(), None, Local::now()).unwrap().item_id,
+        );
+        let mut d = draft();
+        d.follow_up = Some(crate::follow_up::tests::sample());
+        let it = valid(&store, &add(&store, d, None, Local::now()).unwrap().item_id);
+        let f = it.follow_up.as_ref().unwrap();
+        assert!(!f.checked);
+        assert_eq!(f.text, "compare the offer");
+        assert_eq!(f.choices[0].selected, "Agent A");
+        assert_eq!(content_digest(&it), content_digest(&plain));
+        // A draft without one stores none (and no key in item.json).
+        let raw =
+            fs::read_to_string(store.item_dir(&plain.item_id).unwrap().join(ITEM_FILE)).unwrap();
+        assert!(!raw.contains("follow_up"));
+    }
+
+    #[test]
+    fn a_checked_or_broken_follow_up_is_refused_before_writing() {
+        let (_r, store, _files) = setup("fu2");
+        let mut d = draft();
+        let mut f = crate::follow_up::tests::sample();
+        f.checked = true;
+        d.follow_up = Some(f);
+        let e = add(&store, d, None, Local::now()).unwrap_err();
+        assert!(e.0.contains("follow_up.checked"), "{e:?}");
+        let mut d = draft();
+        let mut f = crate::follow_up::tests::sample();
+        f.choices[0].selected = "Agent C".into();
+        d.follow_up = Some(f);
+        let e = add(&store, d, None, Local::now()).unwrap_err();
+        assert!(e.0.contains("choices[0].selected"), "{e:?}");
+        assert!(queue_names(&store).is_empty());
     }
 }

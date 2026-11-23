@@ -66,8 +66,8 @@ The rules:
 
 - Required fields: `schema` (exactly `draftdesk/1`), `account`, `from` (`address`, optional `name`), `to`, `subject`,
   `body`.
-- Optional fields: `cc`, `bcc`, `attachments`, `reply`, `thread`, `mailbox_draft`, `origin`, `checks`. Unknown fields
-  are refused.
+- Optional fields: `cc`, `bcc`, `attachments`, `reply`, `thread`, `mailbox_draft`, `origin`, `follow_up`, `checks`.
+  Unknown fields are refused.
 - `from.address` must be one of the account's senders.
 - Recipients are written `Name <a@b>`, `<a@b>` or `a@b`. At most 20 recipients in To, Cc and Bcc together; no address
   twice across the three fields.
@@ -79,6 +79,14 @@ The rules:
 - `thread`: the earlier messages as plain text, shown read-only.
 - `checks`: the agent's own check result, in the same format a check command returns (see
   [Check and fix commands](#check-and-fix-commands-optional)).
+- `follow_up` (optional): a step the agent offers for after sending. Shape:
+  `{"label": "...", "text": "...", "choices": [{"name": "...", "options": ["...", "..."], "selected": "..."}]}`
+  `label` is required (at most 120 characters). `text` is optional, one line, at most 2,000 characters; line breaks
+  become spaces, control, bidi and invisible characters are removed. `choices` is optional, at most 4; each has a
+  `name` (at most 80 characters) and 1 to 40 distinct `options` (at most 80 characters each). `selected` must be one
+  of the options; left empty, it is the first. Labels, names and options take no line breaks and no control or bidi
+  characters. Only the person sets `checked`, in the window. A draft that arrives with `"checked": true` is refused
+  (exit code 2).
 
 **Idempotency.** With `origin.correlation` set, adding the same draft again (same account, agent and correlation)
 returns the existing draft's id instead of a second draft. A different draft under the same correlation is refused.
@@ -89,6 +97,16 @@ never withdraws one the person has edited in the window, and never one that is a
 **Mailbox draft.** If the agent also saved the draft in the mailbox, `mailbox_draft` names it. After sending or
 discarding, Draft Desk removes that mailbox draft. The checks it makes first are described under
 [Accounts](#accounts).
+
+**Follow-up.** The window shows the `follow_up` under the text: a checkbox with the agent's label, a one-line text
+field and one pop-up menu per choice. The person ticks the box or not when sending. Draft Desk only stores the answer
+and never acts on it. Once the mail went out, the agent reads the answer with `draftdesk status <id>` (key
+`follow_up`). Before sending, `status` and `draftdesk list --json` show the current state, which the person can
+still change; the answer counts once the result says `sent`. Both show `null` for a draft without a follow-up.
+The answer is no part of the mail: ticking the box or changing the text is no edit of the draft. It does not block
+`--replaces`, make the check results stale or need a new check. With `origin.correlation`, adding the same mail again
+returns the first draft as before, and its `follow_up` stays as first handed over: the follow-up is no part of the
+content that is compared. The send click saves the answer first and freezes it, like the mail itself.
 
 ## What the agent gets back
 

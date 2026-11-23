@@ -398,6 +398,10 @@ impl Store {
         {
             bail!("content edit conflicts with state {:?}", old.state);
         }
+        // The answer sent with the click stays what the agent reads afterwards.
+        if old.state != Ready && old.follow_up != new.follow_up {
+            bail!("follow-up change conflicts with state {:?}", old.state);
+        }
         let outcome = new.send.transport_outcome;
         if outcome == Some(Accepted) && !matches!(new.state, Sending | Sent) {
             bail!("accepted transport outcome needs state sending or sent");
@@ -1060,6 +1064,39 @@ pub(crate) mod tests {
             // Non-content changes stay possible.
             store.note(&id, "n", "").unwrap();
         }
+    }
+
+    #[test]
+    fn follow_up_answer_frozen_after_ready() {
+        let (_r, store, id) = store_with_item("fufrozen");
+        let f = crate::follow_up::from_agent(crate::follow_up::tests::sample()).unwrap();
+        let set = |i: &mut Item| {
+            i.follow_up = Some(f.clone());
+            Ok(())
+        };
+        let start = store.mutate(&id, &[], set).unwrap();
+        let checked = store
+            .mutate(&id, &[], |i| {
+                i.follow_up.as_mut().unwrap().checked = true;
+                Ok(())
+            })
+            .unwrap();
+        // No content: the content revision stays, so the findings and the shown version stay valid.
+        assert_eq!(checked.content_revision, start.content_revision);
+        store
+            .mutate(&id, &[], |i| {
+                i.state = State::SendingScheduled;
+                Ok(())
+            })
+            .unwrap();
+        let err = store
+            .mutate(&id, &[], |i| {
+                i.follow_up.as_mut().unwrap().checked = false;
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(err.0.contains("follow-up change conflicts"), "{err}");
+        assert!(valid(store.read(&id)).follow_up.unwrap().checked);
     }
 
     #[test]

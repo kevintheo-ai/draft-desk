@@ -4,6 +4,7 @@
 
 use crate::add::unique_name;
 use crate::address;
+use crate::follow_up::Answer;
 use crate::item::{
     Attachment, CheckSource, Checks, Item, ItemRead, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS,
     MAX_TOTAL_ATTACHMENT_BYTES, State, attachment_name_ok,
@@ -36,6 +37,8 @@ pub const FIELD_BCC: &str = "bcc";
 pub const FIELD_SUBJECT: &str = "subject";
 pub const FIELD_BODY: &str = "body";
 pub const FIELD_ATTACHMENTS: &str = "attachments";
+/// The follow-up answer: in the history, never in `edits.fields_changed` (it is no part of the mail).
+pub const FIELD_FOLLOW_UP: &str = "follow_up";
 
 /// What the window's fields hold; recipient fields as their entries (tokens).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +50,8 @@ pub struct Form {
     pub bcc: Vec<String>,
     pub subject: String,
     pub body: String,
+    /// `None` when the draft has no follow-up.
+    pub follow_up: Option<Answer>,
 }
 
 impl Form {
@@ -59,6 +64,7 @@ impl Form {
             bcc: item.bcc.clone(),
             subject: item.subject.clone(),
             body: item.body.clone(),
+            follow_up: item.follow_up.as_ref().map(Answer::of),
         }
     }
 }
@@ -73,6 +79,7 @@ pub struct Edit {
     pub bcc: Option<Vec<String>>,
     pub subject: Option<String>,
     pub body: Option<String>,
+    pub follow_up: Option<Answer>,
 }
 
 impl Edit {
@@ -104,6 +111,10 @@ pub fn diff(item: &Item, form: &Form) -> Edit {
         bcc: list(&form.bcc, &item.bcc),
         subject: text(&form.subject, &item.subject),
         body: text(&form.body, &item.body),
+        follow_up: form
+            .follow_up
+            .clone()
+            .filter(|a| item.follow_up.as_ref().map(Answer::of).as_ref() != Some(a)),
     }
 }
 
@@ -142,6 +153,12 @@ pub fn save_edits(
         norm(FIELD_CC, &edit.cc)?,
         norm(FIELD_BCC, &edit.bcc)?,
     );
+    if let Some(a) = &edit.follow_up {
+        let Some(mut f) = current.follow_up.clone() else {
+            bail!("follow_up: the draft has none");
+        };
+        crate::follow_up::apply(&mut f, a)?;
+    }
     let apply = |i: &mut Item| -> Vec<&'static str> {
         let mut changed = Vec::new();
         if let Some(v) = &edit.from_address
@@ -187,6 +204,14 @@ pub fn save_edits(
             i.body_sha256 = sha256_hex(v.as_bytes());
             changed.push(FIELD_BODY);
         }
+        if let (Some(a), Some(f)) = (&edit.follow_up, i.follow_up.as_mut()) {
+            let before = f.clone();
+            // Fits: checked above, and the choices of a draft never change.
+            let _ = crate::follow_up::apply(f, a);
+            if *f != before {
+                changed.push(FIELD_FOLLOW_UP);
+            }
+        }
         changed
     };
     if apply(&mut current.clone()).is_empty() {
@@ -197,8 +222,21 @@ pub fn save_edits(
             bail!("content_changed: the draft changed since it was shown");
         }
         let changed = apply(i);
-        mark_edited(i, &changed);
-        push_history(i, "edited", &changed.join(", "));
+        let content: Vec<&str> = changed
+            .iter()
+            .copied()
+            .filter(|f| *f != FIELD_FOLLOW_UP)
+            .collect();
+        if !content.is_empty() {
+            mark_edited(i, &content);
+            push_history(i, "edited", &content.join(", "));
+        }
+        if changed.contains(&FIELD_FOLLOW_UP)
+            && let Some(f) = &i.follow_up
+        {
+            let detail = if f.checked { "checked" } else { "not checked" };
+            push_history(i, FIELD_FOLLOW_UP, detail);
+        }
         Ok(())
     })
 }
@@ -454,6 +492,86 @@ mod tests {
             .map(|h| h.detail.as_str())
             .collect();
         assert_eq!(edited, vec!["subject", "body"]);
+    }
+
+    /// A ready item with the sample follow-up, as `add` stores it.
+    fn with_follow_up(name: &str) -> (crate::store::tests::TempRoot, Store, String) {
+        let (r, store, id) = store_with_item(name);
+        let f = crate::follow_up::from_agent(crate::follow_up::tests::sample()).unwrap();
+        store
+            .mutate(&id, &[], |i| {
+                i.follow_up = Some(f);
+                Ok(())
+            })
+            .unwrap();
+        (r, store, id)
+    }
+
+    fn answer(checked: bool, text: &str, selected: &[&str]) -> Edit {
+        Edit {
+            follow_up: Some(Answer {
+                checked,
+                text: text.into(),
+                selected: selected.iter().map(|s| s.to_string()).collect(),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn follow_up_answer_saved_without_marking_the_mail_edited() {
+        let (_r, store, id) = with_follow_up("fu1");
+        let before = get(&store, &id);
+        let mut form = Form::of(&before);
+        assert!(diff(&before, &form).is_empty());
+        form.follow_up.as_mut().unwrap().checked = true;
+        let e = diff(&before, &form);
+        assert_eq!(e, answer(true, "compare the offer", &["Agent A", "1 week"]));
+        let it = save_edits(
+            &store,
+            &id,
+            1,
+            &answer(true, "read\nit", &["Agent B", "1 week"]),
+        )
+        .unwrap();
+        let f = it.follow_up.as_ref().unwrap();
+        assert!(f.checked);
+        assert_eq!(f.text, "read it");
+        assert_eq!(f.choices[0].selected, "Agent B");
+        assert!(!it.edits.edited, "an answer is no edit of the mail");
+        assert_eq!(it.content_revision, before.content_revision);
+        assert_eq!(it.history.last().unwrap().event, "follow_up");
+        assert_eq!(it.history.last().unwrap().detail, "checked");
+        // The same answer again writes nothing.
+        let again = save_edits(
+            &store,
+            &id,
+            1,
+            &answer(true, "read it", &["Agent B", "1 week"]),
+        )
+        .unwrap();
+        assert_eq!(again.state_revision, it.state_revision);
+        // With a mail change in the same save: the mail is edited, the answer is not among its fields.
+        let mut both = answer(false, "read it", &["Agent B", "1 week"]);
+        both.subject = Some("New".into());
+        let it = save_edits(&store, &id, 1, &both).unwrap();
+        assert_eq!(it.edits.fields_changed, vec!["subject"]);
+        assert!(!it.follow_up.unwrap().checked);
+    }
+
+    #[test]
+    fn a_follow_up_answer_that_does_not_fit_is_refused() {
+        let (_r, store, id) = with_follow_up("fu2");
+        let before = get(&store, &id);
+        let err =
+            save_edits(&store, &id, 1, &answer(true, "", &["Agent C", "1 week"])).unwrap_err();
+        assert!(err.0.contains("choices[0].selected"), "{err}");
+        let err = save_edits(&store, &id, 1, &answer(true, "", &["Agent A"])).unwrap_err();
+        assert!(err.0.contains("1 answers for 2"), "{err}");
+        assert_eq!(get(&store, &id), before);
+        let (_r2, plain, pid) = store_with_item("fu3");
+        let err = save_edits(&plain, &pid, 1, &answer(true, "", &[])).unwrap_err();
+        assert!(err.0.contains("has none"), "{err}");
     }
 
     #[test]

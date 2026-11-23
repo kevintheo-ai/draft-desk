@@ -41,7 +41,8 @@ mod harness {
     };
     use objc2_app_kit::{
         NSAppearance, NSAppearanceCustomization, NSBitmapImageFileType, NSButton, NSControl,
-        NSImageView, NSScroller, NSTextField, NSTextView, NSView,
+        NSControlStateValueOff, NSControlStateValueOn, NSImageView, NSScroller, NSTextField,
+        NSTextView, NSView,
     };
     use objc2_foundation::NSDictionary;
     use std::path::Path;
@@ -237,6 +238,14 @@ mod harness {
             (
                 "typing_then_flush_saves_and_marks_edited",
                 typing_then_flush_saves_and_marks_edited,
+            ),
+            (
+                "follow_up_row_shows_and_saves_the_answer",
+                follow_up_row_shows_and_saves_the_answer,
+            ),
+            (
+                "send_click_saves_the_follow_up_first",
+                send_click_saves_the_follow_up_first,
             ),
             (
                 "silent_autosave_failure_keeps_text_dirty",
@@ -841,6 +850,97 @@ mod harness {
             stored(&id).to,
             vec!["Ann <ann@example.org>", "bob@example.org"]
         );
+    }
+
+    fn follow_up_extra() -> serde_json::Value {
+        serde_json::json!({"follow_up": {"label": "Wait for a reply, then", "text": "compare the offer",
+            "choices": [{"name": "Who", "options": ["Agent A", "Agent B"]},
+                        {"name": "Deadline", "options": ["3 working days", "1 week"]}]}})
+    }
+
+    fn follow_up_row_shows_and_saves_the_answer(mtm: MainThreadMarker) {
+        let mut f = fixture("fu1", CFG);
+        let plain = f.add("Plain");
+        let id = f.add_draft(draft("Re: Offer", "Hello Ann,\n", follow_up_extra()));
+        f.install(mtm);
+        with_app_now(|a| a.select(Some(&plain))).unwrap();
+        with_app_now(|a| {
+            assert!(a.editor.follow.view.isHidden());
+            assert_eq!(a.editor.form().follow_up, None);
+        })
+        .unwrap();
+        with_app_now(|a| a.select(Some(&id))).unwrap();
+        let (check, who, text) = with_app_now(|a| {
+            let row = &a.editor.follow;
+            assert!(!row.view.isHidden());
+            assert_eq!(row.check.title().to_string(), "Wait for a reply, then");
+            assert_eq!(row.check.state(), NSControlStateValueOff);
+            assert_eq!(row.text.stringValue().to_string(), "compare the offer");
+            assert!(!row.popups[1].isHidden() && row.popups[2].isHidden());
+            let deadline = row.popups[1].titleOfSelectedItem().unwrap().to_string();
+            assert_eq!(deadline, "3 working days");
+            assert!(row.check.isEnabled() && row.text.isEditable());
+            (row.check.clone(), row.popups[0].clone(), row.text.clone())
+        })
+        .unwrap();
+        // The answer, as a hand gives it: the click reaches the app through its action.
+        // SAFETY: a button of the app's own window, main thread.
+        unsafe { check.performClick(None) };
+        who.selectItemWithTitle(&NSString::from_str("Agent B"));
+        text.setStringValue(&NSString::from_str("read it, then answer"));
+        settle(0.05);
+        with_app_now(|a| {
+            assert!(a.dirty, "the click marks unsaved");
+            assert!(a.flush(true));
+        })
+        .unwrap();
+        let saved = stored(&id);
+        let fu = saved.follow_up.clone().unwrap();
+        assert!(fu.checked);
+        assert_eq!(fu.text, "read it, then answer");
+        assert_eq!(fu.choices[0].selected, "Agent B");
+        assert!(!saved.edits.edited, "an answer is no edit of the mail");
+        // Once the draft left `ready`, the answer shows read-only.
+        with_app_now(|a| {
+            a.desk
+                .as_ref()
+                .unwrap()
+                .sender()
+                .store()
+                .mutate(&id, &[], |i| {
+                    i.state = State::Failed;
+                    Ok(())
+                })
+                .unwrap();
+        })
+        .unwrap();
+        refresh();
+        with_app_now(|a| {
+            let row = &a.editor.follow;
+            assert!(!row.check.isEnabled() && !row.text.isEditable() && !row.popups[0].isEnabled());
+            assert_eq!(row.check.state(), NSControlStateValueOn);
+        })
+        .unwrap();
+    }
+
+    fn send_click_saves_the_follow_up_first(mtm: MainThreadMarker) {
+        let (_f, id, record) = send_draft(mtm, "fu2", follow_up_extra());
+        let button = with_app_now(|a| {
+            a.editor.follow.check.setState(NSControlStateValueOn);
+            a.on_action(Action::Send);
+            a.editor.undo.button.clone()
+        })
+        .unwrap();
+        let scheduled = stored(&id);
+        assert_eq!(scheduled.state, State::SendingScheduled);
+        assert!(
+            scheduled.follow_up.unwrap().checked,
+            "saved before the click counts"
+        );
+        // SAFETY: a button of the app's own window, main thread.
+        unsafe { button.performClick(None) };
+        assert!(wait_for(2.0, || stored(&id).state == State::Ready));
+        assert!(!record.exists());
     }
 
     fn silent_autosave_failure_keeps_text_dirty(mtm: MainThreadMarker) {

@@ -3,6 +3,7 @@
 
 use crate::address;
 use crate::config::Config;
+use crate::follow_up::FollowUp;
 use crate::sha256_hex;
 use crate::text::{has_forbidden, has_linebreak};
 use regex::Regex;
@@ -67,6 +68,9 @@ pub struct Draft {
     pub origin: Option<Origin>,
     #[serde(default)]
     pub checks: Option<Checks>,
+    /// A step the person may ask for after sending (`follow_up.rs`).
+    #[serde(default)]
+    pub follow_up: Option<FollowUp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -117,6 +121,10 @@ pub struct Item {
     pub added_digest: Option<String>,
     pub attachments: Vec<Attachment>,
     pub checks: Option<Checks>,
+    /// The agent's follow-up with the person's answer. No content: outside the digest, so a click on the checkbox
+    /// neither needs a new check nor counts as an edit of the mail; frozen like content once the item left `ready`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_up: Option<FollowUp>,
     pub edits: Edits,
     pub send: SendState,
     pub history: Vec<HistoryEntry>,
@@ -403,6 +411,9 @@ pub fn validate_item(item: &Item, cfg: &Config) -> Vec<String> {
     {
         errors.push("checks.body_sha256: not ^[0-9a-f]{64}$".into());
     }
+    if let Some(f) = &item.follow_up {
+        errors.extend(crate::follow_up::validate(f));
+    }
     let s = &item.send;
     for (label, v, re) in [
         ("send.token", &s.token, &*TOKEN_RE),
@@ -635,6 +646,7 @@ pub(crate) mod tests {
             added_digest: None,
             attachments: vec![],
             checks: None,
+            follow_up: None,
             edits: Edits::default(),
             send: SendState::default(),
             history: vec![HistoryEntry {

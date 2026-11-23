@@ -23,6 +23,7 @@ use draftdesk_core::text::{forbidden_utf16, strip_forbidden};
 use crate::app::Delegate;
 use crate::attachments::Strip;
 use crate::findings::Findings;
+use crate::follow_up::FollowUpRow;
 use crate::i18n::tr;
 use crate::preview;
 use crate::ui::{insets, label, ns, stack};
@@ -253,6 +254,8 @@ pub struct Editor {
     pub body_scroll: Retained<NSScrollView>,
     pub body: Retained<NSTextView>,
     pub preview: Retained<WKWebView>,
+    /// What the person asks for after sending, under the text (only for a draft that has one).
+    pub follow: FollowUpRow,
     pub thread: Thread,
     /// Shown when no draft is selected.
     pub empty: Retained<NSTextField>,
@@ -430,6 +433,7 @@ impl Editor {
         preview.setHidden(true);
         let strip = Strip::new(mtm);
         let findings = Findings::new(mtm);
+        let follow = FollowUpRow::new(mtm, delegate);
         let thread = Thread::new(mtm, delegate);
 
         let root = stack(
@@ -443,6 +447,7 @@ impl Editor {
                 &toggle,
                 &body_scroll,
                 &preview,
+                &follow.view,
                 &thread.row,
                 &thread.scroll,
             ],
@@ -460,6 +465,7 @@ impl Editor {
             &findings.view,
             &body_scroll,
             &preview,
+            &follow.view,
             &thread.scroll,
         ] {
             fill_width(v, &root, 16.0);
@@ -507,6 +513,7 @@ impl Editor {
             body_scroll,
             body,
             preview,
+            follow,
             thread,
             empty,
             senders: Vec::new(),
@@ -578,6 +585,7 @@ impl Editor {
             &self.toggle,
             &self.body_scroll,
             &self.preview,
+            &self.follow.view,
             &self.thread.row,
             &self.thread.scroll,
         ] {
@@ -629,6 +637,7 @@ impl Editor {
         set_tokens(&self.bcc, &item.bcc);
         self.subject.setStringValue(&ns(&item.subject));
         self.body.setString(&ns(&item.body));
+        self.follow.load(item.follow_up.as_ref());
         // Another draft (or its saved state again): undo steps of the text before would act on the wrong text.
         if let Some(undo) = self.body.undoManager() {
             undo.removeAllActions();
@@ -664,6 +673,7 @@ impl Editor {
             self.body.setString(&ns(&item.body));
             self.refresh_preview();
         }
+        self.follow.redraw(item.follow_up.as_ref());
     }
 
     /// Marks the invisible characters of the text in red; returns how many the text and the subject hold.
@@ -735,6 +745,7 @@ impl Editor {
             bcc: tokens(&self.bcc),
             subject: self.subject.stringValue().to_string(),
             body: self.body.string().to_string(),
+            follow_up: self.follow.answer(),
         }
     }
 
@@ -764,6 +775,7 @@ impl Editor {
         }
         self.subject.setEditable(editable);
         self.body.setEditable(editable);
+        self.follow.set_editable(editable);
         self.lock_name();
         self.restrict_drops(editable);
     }

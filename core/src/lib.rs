@@ -8,6 +8,7 @@ pub mod config;
 #[cfg(feature = "send")]
 pub mod desk;
 pub mod edit;
+pub mod follow_up;
 pub mod gmail;
 pub mod html;
 #[cfg(feature = "send")]

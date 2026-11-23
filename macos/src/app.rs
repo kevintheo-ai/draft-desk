@@ -252,6 +252,12 @@ define_class!(
             });
         }
 
+        /// The follow-up's checkbox or one of its pop-up menus (its text field reports as a header field does).
+        #[unsafe(method(followUpChanged:))]
+        fn follow_up_changed(&self, _sender: Option<&AnyObject>) {
+            with_app(App::mark_dirty);
+        }
+
         #[unsafe(method(bannerAction:))]
         fn banner_action(&self, _sender: Option<&AnyObject>) {
             with_app(App::banner_action);

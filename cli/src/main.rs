@@ -252,7 +252,7 @@ fn summary(r: &ItemRead) -> Value {
         ItemRead::Valid(i) => json!({
             "item_id": i.item_id, "state": i.state, "account": i.account, "subject": i.subject,
             "to": i.to, "cc": i.cc, "reply": i.reply, "origin": i.origin, "created_at": i.created_at,
-            "edited": i.edits.edited,
+            "edited": i.edits.edited, "follow_up": i.follow_up,
         }),
         ItemRead::Invalid { item_id, errors } => {
             json!({"item_id": item_id, "state": "invalid", "errors": errors})
